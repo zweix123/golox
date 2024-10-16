@@ -1,6 +1,9 @@
 package scanner
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 type Scanner struct {
 	source  string
@@ -70,6 +73,8 @@ func (s *Scanner) scanToken() error { // 每次扫描, 返回一个token
 	case ';':
 		s.addToken(Semicolon, nil)
 
+	// 这里是一种最短匹配, 即看很小的几位就确定其含义, 这对符号来说是可以的,
+	// 但是对于标识符来说, 就不行, 标识符是最长匹配, 即一个完成的token读完, 再决定.
 	case '!':
 		if s.match('=') {
 			s.addToken(BangEqual, nil)
@@ -104,20 +109,46 @@ func (s *Scanner) scanToken() error { // 每次扫描, 返回一个token
 			s.addToken(Slash, nil)
 		}
 
+	// TODO: 添加对/**/注释的支持
+
 	case ' ':
 	case '\r':
 	case '\t':
 	case '\n':
 		s.line++
 
+	case '"':
+		err := s.string()
+		if err != nil {
+			return fmt.Errorf("string error: %w", err)
+		}
+
 	default:
-		return fmt.Errorf("unexpected character: %c", c)
+		if isDigit(c) {
+			err := s.number()
+			if err != nil {
+				return fmt.Errorf("number error: %w", err)
+			}
+		} else if isAlpha(c) {
+			s.identifier()
+		} else {
+			return fmt.Errorf("unexpected character: %c", c)
+		}
+
 	}
 	return nil
 }
 
+/*
+ * 三个动作
+ * 1. 前进
+ * 2. 先看再决策是否前进
+ * 3. 只看不前进
+ * s.currentu是指向当前处理的一下个的
+ */
+
 func (s *Scanner) advance() byte { // 获取下一个字符
-	//! 到末尾了怎么办?
+	//! 到末尾了怎么办?使用了字符串末尾的'\000'了么?
 	s.current++
 	return s.source[s.current-1]
 }
@@ -143,4 +174,65 @@ func (s *Scanner) peek() byte { // 获取下一个字符(而不前进)
 	}
 
 	return s.source[s.current]
+}
+
+func (s *Scanner) peekNext() byte {
+	if s.current+1 >= len(s.source) {
+		return '\000'
+	}
+	return s.source[s.current+1]
+}
+
+/*
+ * 字符串
+ */
+
+func (s *Scanner) string() error {
+	for s.peek() != '"' && !s.isAtEnd() {
+		if s.peek() == '\n' { // Lox支持多行字符串
+			s.line++
+		}
+		s.advance()
+	}
+	if s.isAtEnd() {
+		return fmt.Errorf("unterminated string")
+	}
+
+	s.advance() // the closing "
+
+	s.addToken(String, s.source[s.start+1:s.current-1])
+	return nil
+}
+
+func (s *Scanner) number() error {
+	for isDigit(s.peek()) {
+		s.advance()
+	}
+
+	// Look for a fractional part.
+	if s.peek() == '.' && isDigit(s.peekNext()) { // 家涮Lox将万物视为对象的, 怎么处理123.sqrt()这样的语法?
+		s.advance() // consume the "."
+
+		for isDigit(s.peek()) {
+			s.advance()
+		}
+	}
+	f, err := strconv.ParseFloat(s.source[s.start:s.current], 64)
+	if err != nil {
+		return fmt.Errorf("parse float error: %w", err)
+	}
+	s.addToken(Number, f)
+	return nil
+}
+
+func (s *Scanner) identifier() {
+	for isAlpha(s.peek()) || isDigit(s.peek()) {
+		s.advance()
+	}
+	text := s.source[s.start:s.current]
+	tokenType, ok := keywords[text]
+	if !ok {
+		tokenType = Identifier // 假如不在关键字(保留子)中, 则是标识符
+	}
+	s.addToken(tokenType, nil)
 }
