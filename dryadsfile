@@ -1,0 +1,9 @@
+from dryads import Dryads, DryadsFlag  # type: ignore
+
+Dryads(
+    {
+        "build": "go build -o lox ./cmd/lox/main.go",
+        "run": "go run ./cmd/lox/main.go",
+        "clean": "rm -rf lox",
+    }
+)
